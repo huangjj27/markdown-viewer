@@ -2,7 +2,7 @@
 // chrome.storage.sync.clear()
 // chrome.permissions.getAll((p) => chrome.permissions.remove({origins: p.origins}))
 
-var match = '\\.(?:markdown|mdown|mkdn|md|mkd|mdwn|mdtxt|mdtext|text)(?:#.*)?$'
+var match = '\\.(?:markdown|mdown|mkdn|md|mkd|mdwn|mdtxt|mdtext|text)(?:#.*|\\?.*)?$'
 
 var defaults = {
   theme: 'github',
@@ -10,7 +10,8 @@ var defaults = {
   content: {
     emoji: false,
     scroll: true,
-    toc: false
+    toc: false,
+    mathjax: false,
   },
   raw: false,
   header: true,
@@ -68,6 +69,13 @@ chrome.storage.sync.get((res) => {
   if (options.header === undefined) {
     options.header = true
   }
+  // v3.1 -> v3.2
+  if (options.remark && options.remark.yaml) {
+    delete options.remark.yaml
+  }
+  if (options.content.mathjax === undefined) {
+    options.content.mathjax = false
+  }
 
   Object.keys(md).forEach((compiler) => {
     if (!options[compiler]) {
@@ -94,7 +102,9 @@ function inject (id) {
 
   chrome.tabs.executeScript(id, {file: 'vendor/mithril.min.js', runAt: 'document_start'})
   chrome.tabs.executeScript(id, {file: 'vendor/prism.js', runAt: 'document_start'})
-  chrome.tabs.executeScript(id, {file: 'content/emoji.js', runAt: 'document_start'})
+  if (state.content.emoji) {
+    chrome.tabs.executeScript(id, {file: 'content/emoji.js', runAt: 'document_start'})
+  }
   chrome.tabs.executeScript(id, {file: 'content/content.js', runAt: 'document_start'})
 }
 
@@ -144,7 +154,20 @@ chrome.tabs.onUpdated.addListener((id, info, tab) => {
 
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
   if (req.message === 'markdown') {
-    md[state.compiler].compile(req.markdown, sendResponse)
+    var markdown = req.markdown
+
+    if (state.content.mathjax) {
+      var m = mathjax()
+      markdown = m.tokenize(markdown)
+    }
+
+    var html = md[state.compiler].compile(markdown)
+
+    if (state.content.mathjax) {
+      html = m.detokenize(html)
+    }
+
+    sendResponse({message: 'html', html})
   }
   else if (req.message === 'settings') {
     sendResponse(Object.assign({}, state, {
